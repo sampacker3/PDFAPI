@@ -2,7 +2,6 @@ from flask import Flask, request, jsonify
 from weasyprint import HTML
 import base64
 import os
-from concurrent.futures import ThreadPoolExecutor
 import time
 from datetime import datetime
 import logging
@@ -23,114 +22,101 @@ try:
 except Exception as e:
     logger.error(f"❌ Warmup failed: {e}")
 
-# Thread pool for concurrent processing
-executor = ThreadPoolExecutor(max_workers=4)
-
-def generate_pdf_with_styling(html_content):
-    """Generate PDF with enhanced styling"""
-    from bs4 import BeautifulSoup
+def add_default_styling(html_content):
+    """Add default styling if no CSS exists"""
+    # Simple check for existing styles
+    if '<style>' in html_content.lower() or 'stylesheet' in html_content.lower():
+        return html_content
     
-    # Add professional styling if no CSS exists
-    soup = BeautifulSoup(html_content, 'html.parser')
-    if not soup.find('style') and not soup.find('link', rel='stylesheet'):
-        style_tag = soup.new_tag('style')
-        style_tag.string = """
-            @page {
-                margin: 1in;
-                @bottom-center {
-                    content: "Page " counter(page) " of " counter(pages);
-                    font-size: 9pt;
-                    color: #666;
-                }
+    # Add basic styling
+    default_css = """
+    <style>
+        @page {
+            margin: 1in;
+            @bottom-center {
+                content: "Page " counter(page) " of " counter(pages);
+                font-size: 9pt;
+                color: #666;
             }
-            body { 
-                font-family: 'Helvetica', 'Arial', sans-serif;
-                line-height: 1.6; 
-                color: #333;
-                font-size: 11pt;
-            }
-            h1 { 
-                color: #2c3e50; 
-                border-bottom: 2px solid #3498db;
-                padding-bottom: 8px;
-                font-size: 18pt;
-            }
-            h2 { 
-                color: #34495e; 
-                margin-top: 24pt;
-                font-size: 14pt;
-            }
-            h3 { 
-                color: #7f8c8d; 
-                font-size: 12pt;
-            }
-            p { 
-                margin-bottom: 8pt; 
-                text-align: justify;
-            }
-            table { 
-                border-collapse: collapse; 
-                width: 100%; 
-                margin: 12pt 0;
-            }
-            th, td { 
-                border: 1px solid #ddd; 
-                padding: 8pt; 
-                text-align: left; 
-                font-size: 10pt;
-            }
-            th { 
-                background-color: #f8f9fa;
-                font-weight: bold;
-            }
-            tr:nth-child(even) { background-color: #f8f9fa; }
-            ul, ol { margin: 8pt 0; }
-            li { margin-bottom: 4pt; }
-            .page-break { page-break-before: always; }
-            img { max-width: 100%; height: auto; }
-            blockquote {
-                border-left: 4px solid #3498db;
-                margin: 12pt 0;
-                padding-left: 12pt;
-                font-style: italic;
-            }
-        """
-        if soup.head:
-            soup.head.append(style_tag)
-        else:
-            head_tag = soup.new_tag('head')
-            head_tag.append(style_tag)
-            soup.insert(0, head_tag)
-        html_content = str(soup)
+        }
+        body { 
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            line-height: 1.6; 
+            color: #333;
+            font-size: 11pt;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 { 
+            color: #2c3e50; 
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 8px;
+            font-size: 18pt;
+        }
+        h2 { 
+            color: #34495e; 
+            margin-top: 24pt;
+            font-size: 14pt;
+        }
+        h3 { 
+            color: #7f8c8d; 
+            font-size: 12pt;
+        }
+        p { 
+            margin-bottom: 8pt; 
+            text-align: justify;
+        }
+        table { 
+            border-collapse: collapse; 
+            width: 100%; 
+            margin: 12pt 0;
+        }
+        th, td { 
+            border: 1px solid #ddd; 
+            padding: 8pt; 
+            text-align: left; 
+            font-size: 10pt;
+        }
+        th { 
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        ul, ol { margin: 8pt 0; }
+        li { margin-bottom: 4pt; }
+        .page-break { page-break-before: always; }
+        img { max-width: 100%; height: auto; }
+        blockquote {
+            border-left: 4px solid #3498db;
+            margin: 12pt 0;
+            padding-left: 12pt;
+            font-style: italic;
+        }
+    </style>
+    """
+    
+    # Insert CSS into HTML
+    if '<head>' in html_content.lower():
+        html_content = html_content.replace('<head>', f'<head>{default_css}', 1)
+    elif '<html>' in html_content.lower():
+        html_content = html_content.replace('<html>', f'<html><head>{default_css}</head>', 1)
+    else:
+        # Wrap content in basic HTML structure
+        html_content = f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>PDF Document</title>
+            {default_css}
+        </head>
+        <body>
+            {html_content}
+        </body>
+        </html>
+        '''
     
     return html_content
-
-def process_pdf(html_content, request_id):
-    """Process PDF in thread pool"""
-    start = time.time()
-    try:
-        # Apply styling
-        styled_html = generate_pdf_with_styling(html_content)
-        
-        # Generate PDF
-        pdf_bytes = HTML(string=styled_html).write_pdf()
-        processing_time = time.time() - start
-        
-        return {
-            'success': True,
-            'pdf_base64': base64.b64encode(pdf_bytes).decode('utf-8'),
-            'size_bytes': len(pdf_bytes),
-            'processing_time_ms': round(processing_time * 1000, 2),
-            'request_id': request_id
-        }
-    except Exception as e:
-        logger.error(f"PDF generation failed for {request_id}: {str(e)}")
-        return {
-            'success': False,
-            'error': str(e),
-            'processing_time_ms': round((time.time() - start) * 1000, 2),
-            'request_id': request_id
-        }
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -173,17 +159,27 @@ def convert():
                 'request_id': request_id
             }), 400
         
-        # Process in thread pool
-        future = executor.submit(process_pdf, html_content, request_id)
-        result = future.result(timeout=30)
+        logger.info(f"Processing request {request_id}")
         
-        # Add API timing
-        result['api_response_time_ms'] = round((time.time() - request_start) * 1000, 2)
+        # Add default styling
+        styled_html = add_default_styling(html_content)
+        
+        # Generate PDF
+        pdf_bytes = HTML(string=styled_html).write_pdf()
+        
+        # Create response
+        result = {
+            'success': True,
+            'pdf_base64': base64.b64encode(pdf_bytes).decode('utf-8'),
+            'size_bytes': len(pdf_bytes),
+            'processing_time_ms': round((time.time() - request_start) * 1000, 2),
+            'request_id': request_id,
+            'api_response_time_ms': round((time.time() - request_start) * 1000, 2)
+        }
         
         # Log success
-        if result['success']:
-            logger.info(f"✅ PDF: {request_id}, {result['size_bytes']} bytes, "
-                       f"{result['processing_time_ms']}ms")
+        logger.info(f"✅ PDF: {request_id}, {result['size_bytes']} bytes, "
+                   f"{result['processing_time_ms']}ms")
         
         # CORS headers
         response = jsonify(result)
@@ -191,12 +187,14 @@ def convert():
         return response
         
     except Exception as e:
+        processing_time = round((time.time() - request_start) * 1000, 2)
         logger.error(f"❌ API Error {request_id}: {str(e)}")
         response = jsonify({
             'success': False, 
-            'error': f'Server error: {str(e)}',
+            'error': str(e),
             'request_id': request_id,
-            'api_response_time_ms': round((time.time() - request_start) * 1000, 2)
+            'processing_time_ms': processing_time,
+            'api_response_time_ms': processing_time
         })
         response.headers['Access-Control-Allow-Origin'] = '*'
         return response, 500
