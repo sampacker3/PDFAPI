@@ -1,10 +1,21 @@
 FROM python:3.11-slim
 
-# Install wkhtmltopdf and dependencies
+# Install wkhtmltopdf dependencies
 RUN apt-get update && apt-get install -y \
-    wkhtmltopdf \
+    wget \
     xvfb \
+    fontconfig \
+    libjpeg62-turbo \
+    libxrender1 \
+    xfonts-base \
+    xfonts-75dpi \
     && rm -rf /var/lib/apt/lists/*
+
+# Install wkhtmltopdf from .deb release
+RUN wget https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6-1/wkhtmltox_0.12.6-1.buster_amd64.deb \
+    && apt-get update \
+    && apt-get install -y ./wkhtmltox_0.12.6-1.buster_amd64.deb \
+    && rm wkhtmltox_0.12.6-1.buster_amd64.deb
 
 # Set working directory
 WORKDIR /app
